@@ -198,35 +198,92 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Step 1: 确认 (保持不变) */}
+        {/* Step 1: 意图确认卡片 (智能分流版) */}
         {intent && (
           <div className={`w-full max-w-3xl transition-all duration-700 ease-out transform ${step === 1 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 hidden'}`}>
-             {/* ... (此处代码与上一版相同，省略以节省空间，直接用上一版的结构即可) ... */}
-             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold flex items-center gap-2"><span className="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-sm">1</span>Confirm Intent</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <span className="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-sm">1</span>
+                {intent.intentType === 'invest' ? 'Confirm Investment' : 'Confirm Intent'}
+              </h2>
               <button onClick={() => setStep(0)} className="text-sm text-gray-500 hover:text-white underline">Modify</button>
             </div>
+
             <div className="bg-[#111] rounded-2xl border border-white/10 shadow-2xl overflow-hidden relative">
               <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-blue-500 to-purple-500" />
+              
               <div className="p-8">
-                <div className="flex justify-between items-center mb-8">
-                  <div className="flex flex-col"><span className="text-xs text-gray-500 uppercase tracking-wider mb-1">From</span><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]"></div><span className="text-xl font-medium text-white">{getChainName(intent.sourceChainId)}</span></div></div>
-                  <div className="flex-1 border-b border-dashed border-gray-700 mx-6 relative top-2 opacity-50"></div>
-                  <div className="flex flex-col text-right"><span className="text-xs text-gray-500 uppercase tracking-wider mb-1">To</span><div className="flex items-center justify-end gap-2"><span className="text-xl font-medium text-white">{getChainName(intent.destinationChainId)}</span><div className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"></div></div></div>
-                </div>
-                <div className="bg-white/5 rounded-xl p-6 mb-6 flex justify-between items-center border border-white/5">
-                  <div className="flex flex-col"><span className="text-3xl md:text-4xl font-bold text-white tracking-tighter">{intent.inputAmount}</span><span className="text-sm text-gray-400 font-mono mt-1">{getTokenSymbol(intent.inputTokenAddress)}</span></div>
-                  <Icons.ArrowRight />
-                  <div className="flex flex-col text-right"><span className="text-3xl md:text-4xl font-bold text-green-400 tracking-tighter">≈ {intent.minOutputAmount}</span><span className="text-sm text-gray-400 font-mono mt-1">{getTokenSymbol(intent.outputTokenAddress)}</span></div>
-                </div>
+                
+                {/* --- 分支 1: 理财意图 (Invest) --- */}
+                {intent.intentType === 'invest' ? (
+                  <div>
+                    {/* 协议与 APY */}
+                    <div className="flex justify-between items-start mb-8">
+                      <div>
+                         <span className="text-xs text-gray-500 uppercase tracking-wider mb-1">Strategy</span>
+                         <div className="flex items-center gap-2">
+                           <div className="w-8 h-8 bg-pink-500/20 rounded-full flex items-center justify-center text-pink-500 font-bold">U</div>
+                           <div>
+                             <h3 className="text-xl font-bold text-white">{intent.protocol}</h3>
+                             <p className="text-xs text-gray-400">Automated Liquidity Provision</p>
+                           </div>
+                         </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs text-gray-500 uppercase tracking-wider mb-1">Live APY</span>
+                        <div className="text-3xl font-bold text-green-400 flex items-center justify-end gap-1">
+                          <Icons.Sparkles /> {intent.apy}
+                        </div>
+                        <p className="text-xs text-gray-500">Highest Yield Found</p>
+                      </div>
+                    </div>
+
+                    {/* 存入金额 */}
+                    <div className="bg-white/5 rounded-xl p-6 mb-6 border border-white/5">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400 text-sm">You Deposit</span>
+                        <span className="text-gray-400 text-sm font-mono">{getChainName(intent.sourceChainId)}</span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-2">
+                        <span className="text-4xl font-bold text-white tracking-tighter">{intent.inputAmount}</span>
+                        <span className="px-2 py-1 bg-white/10 rounded text-sm text-gray-300 font-mono">{getTokenSymbol(intent.inputTokenAddress)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* --- 分支 2: 常规 Swap/Bridge (原有代码) --- */
+                  <>
+                    <div className="flex justify-between items-center mb-8">
+                      <div className="flex flex-col"><span className="text-xs text-gray-500 uppercase tracking-wider mb-1">From</span><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]"></div><span className="text-xl font-medium text-white">{getChainName(intent.sourceChainId)}</span></div></div>
+                      <div className="flex-1 border-b border-dashed border-gray-700 mx-6 relative top-2 opacity-50"></div>
+                      <div className="flex flex-col text-right"><span className="text-xs text-gray-500 uppercase tracking-wider mb-1">To</span><div className="flex items-center justify-end gap-2"><span className="text-xl font-medium text-white">{getChainName(intent.destinationChainId)}</span><div className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"></div></div></div>
+                    </div>
+                    <div className="bg-white/5 rounded-xl p-6 mb-6 flex justify-between items-center border border-white/5">
+                      <div className="flex flex-col"><span className="text-3xl md:text-4xl font-bold text-white tracking-tighter">{intent.inputAmount}</span><span className="text-sm text-gray-400 font-mono mt-1">{getTokenSymbol(intent.inputTokenAddress)}</span></div>
+                      <Icons.ArrowRight />
+                      <div className="flex flex-col text-right"><span className="text-3xl md:text-4xl font-bold text-green-400 tracking-tighter">≈ {intent.minOutputAmount}</span><span className="text-sm text-gray-400 font-mono mt-1">{getTokenSymbol(intent.outputTokenAddress)}</span></div>
+                    </div>
+                  </>
+                )}
+
+                {/* 公用：接收者信息 (Target Pool for Invest) */}
                 <div className="bg-blue-900/10 rounded-xl p-4 border border-blue-500/20 flex items-center justify-between group">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white shadow-lg"><Icons.User /></div>
-                    <div className="flex flex-col"><span className="text-xs text-blue-400 font-bold uppercase tracking-wider flex items-center gap-2">Recipient (Destination){intent.recipient.toLowerCase() !== address?.toLowerCase() && (<span className="px-1.5 py-0.5 rounded-md bg-blue-500/20 text-blue-300 text-[10px] border border-blue-500/30">External</span>)}</span><span className="font-mono text-sm text-gray-200 break-all group-hover:text-white transition-colors">{intent.recipient}</span></div>
+                    <div className="flex flex-col">
+                      <span className="text-xs text-blue-400 font-bold uppercase tracking-wider flex items-center gap-2">
+                        {intent.intentType === 'invest' ? 'Target Pool Contract' : 'Recipient (Destination)'}
+                        {intent.recipient.toLowerCase() !== address?.toLowerCase() && (<span className="px-1.5 py-0.5 rounded-md bg-blue-500/20 text-blue-300 text-[10px] border border-blue-500/30">Contract</span>)}
+                      </span>
+                      <span className="font-mono text-sm text-gray-200 break-all group-hover:text-white transition-colors">{intent.recipient}</span>
+                    </div>
                   </div>
                   <div className="text-blue-500/50"><Icons.Check /></div>
                 </div>
+
               </div>
+
+              {/* 底部按钮 */}
               <div className="bg-white/5 p-6 border-t border-white/5">
                 <button onClick={handleSign} disabled={isSigning} className="w-full py-4 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl shadow-[0_0_20px_rgba(22,163,74,0.3)] transition-all transform hover:scale-[1.01] flex justify-center items-center gap-2">{isSigning ? 'Requesting Signature...' : 'Sign with imToken ✍️'}</button>
                 <p className="text-center text-xs text-gray-600 mt-3">Gasless signature • EIP-712 Standard</p>

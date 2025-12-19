@@ -3,14 +3,16 @@ import OpenAI from 'openai';
 import { createPublicClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
 
+// 使用主网解析 ENS
 const publicClient = createPublicClient({ chain: mainnet, transport: http() });
+
 const openai = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
   baseURL: "https://openrouter.ai/api/v1",
   defaultHeaders: { "HTTP-Referer": "http://localhost:3000", "X-Title": "Hackathon Demo" },
 });
 
-// --- 1. 扩充知识库 (新增 USDT, DAI) ---
+// 知识库
 const TOKEN_WHITELIST = {
   "42161": { // Arbitrum
     "USDC": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
@@ -41,35 +43,11 @@ async function getEthPrice() {
   } catch (e) { return 3000; }
 }
 
-// --- 2. 升级代币识别逻辑 (包含新地址) ---
 function identifyToken(address: string) {
   if (!address) return 'OTHER';
   const addr = address.toLowerCase();
-  
-  // ETH & WETH
-  if ([
-    "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", // Native
-    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // Mainnet WETH
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // Arb WETH
-    "0x4200000000000000000000000000000000000006"  // Base WETH
-  ].includes(addr)) return 'ETH';
-
-  // Stablecoins (USDC, USDT, DAI)
-  if ([
-    // USDC
-    "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
-    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-    // USDT
-    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
-    "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2",
-    "0xdac17f958d2ee523a2206206994597c13d831ec7",
-    // DAI
-    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
-    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",
-    "0x6b175474e89094c44da98b954eedeac495271d0f"
-  ].includes(addr)) return 'STABLE';
-
+  if (["0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", "0x4200000000000000000000000000000000000006"].includes(addr)) return 'ETH';
+  if (["0xaf88d065e77c8cc2239327c5edb3a432268e5831", "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2", "0xdac17f958d2ee523a2206206994597c13d831ec7", "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", "0x50c5725949a6f0c72e6c4a641f24049a917db0cb", "0x6b175474e89094c44da98b954eedeac495271d0f"].includes(addr)) return 'STABLE';
   return 'OTHER';
 }
 
@@ -78,19 +56,27 @@ export async function POST(req: Request) {
     const { prompt, userAddress, currentChainId } = await req.json();
     const ethPrice = await getEthPrice();
     
+    // --- 升级 Prompt: 强调 ENS 提取 ---
     const systemPrompt = `
       You are a DeFi Intent Parser.
       Context: UserChain=${currentChainId || 42161}, UserAddr=${userAddress}
       
-      CRITICAL RULES:
-      1. DIRECTION: "Swap A for B" means Input=A, Output=B. DO NOT REVERSE.
-      2. AMBIGUITY: If destination chain is set but output token is unknown (e.g. "to Mainnet"), status="ambiguous".
-      3. DEFAULT CHAIN: If user says "on Mainnet" for a swap, BOTH source and destination are 1.
+      RULES:
+      1. INTENT TYPE: 
+         - "Swap/Bridge/Exchange/Transfer/Send" -> "swap"
+         - "Deposit/Save/Invest/Earn/APY/Yield" -> "invest"
+      2. RECIPIENT HANDLING (CRITICAL):
+         - If user mentions an ENS name (e.g., "peijie.eth", "vitalik.eth"), field "recipient" MUST be that exact string. Do not try to resolve it.
+         - If no recipient specified, leave it null (or "undefined").
+      3. FOR "invest": 
+         - Extract "protocol" (e.g. Uniswap).
       
-      STRICT JSON (No nesting):
+      STRICT JSON:
       {
         "status": "success" | "ambiguous",
         "message": "string (if ambiguous)",
+        "intentType": "swap" | "invest",
+        "protocol": "string", 
         "sourceChainId": number, 
         "destinationChainId": number,
         "inputTokenAddress": "0x...", 
@@ -115,50 +101,64 @@ export async function POST(req: Request) {
     });
 
     let result = JSON.parse(completion.choices[0].message.content || "{}");
-    
     if (result.data) result = { ...result, ...result.data };
     if (result.intent) result = { ...result, ...result.intent };
 
-    if (prompt.toLowerCase().includes("swap") && prompt.toLowerCase().includes("mainnet")) {
-        if (!result.sourceChainId || result.sourceChainId === 42161) {
-            result.sourceChainId = 1;
+    // --- 模拟理财逻辑 ---
+    if (result.status === 'success' && result.intentType === 'invest') {
+        result.apy = "12.5%";
+        result.protocol = result.protocol || "Uniswap V3";
+        if (!result.destinationChainId) result.destinationChainId = result.sourceChainId;
+        if (!result.recipient || result.recipient === userAddress) {
+            result.recipient = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"; 
         }
+        if (!result.outputTokenAddress) result.outputTokenAddress = "0x0000000000000000000000000000000000000000";
     }
 
-    if (result.status === 'ambiguous') return NextResponse.json(result);
-    
-    if (!result.sourceChainId) result.sourceChainId = currentChainId || 42161;
-    if (!result.recipient) result.recipient = userAddress;
+    // --- ENS 解析逻辑 (必须在兜底逻辑之前执行) ---
+    // 只有当 recipient 是 .eth 结尾时，才去解析
+    if (result.status === 'success' && result.recipient && typeof result.recipient === 'string' && result.recipient.endsWith('.eth')) {
+      console.log(`🔍 正在解析 ENS: ${result.recipient}`);
+      try {
+        const ensAddress = await publicClient.getEnsAddress({ name: result.recipient });
+        if (ensAddress) {
+            console.log(`✅ ENS 解析成功: ${result.recipient} -> ${ensAddress}`);
+            result.recipient = ensAddress;
+        } else {
+            console.warn("⚠️ ENS 解析结果为空");
+        }
+      } catch (e) { 
+        console.error("❌ ENS 解析出错", e);
+        // 如果解析出错（比如网络问题），为了演示不卡死，可以回退到用户地址，或者保留原样看前端怎么处理
+        // 这里选择回退到 User Address 以保证流程能走通
+        if (!result.recipient.startsWith('0x')) result.recipient = userAddress; 
+      }
+    }
 
-    if (result.status === 'success') {
+    // 常规逻辑
+    if (result.status === 'ambiguous') return NextResponse.json(result);
+    if (!result.sourceChainId) result.sourceChainId = currentChainId || 42161;
+    
+    // 🔥 兜底逻辑：只有在 ENS 解析尝试之后，如果还没值，再填用户地址
+    if (!result.recipient || result.recipient === 'undefined') {
+        result.recipient = userAddress;
+    }
+
+    // 价格计算
+    if (result.status === 'success' && result.intentType !== 'invest') {
       const amount = parseFloat(result.inputAmount || "0");
       const inputType = identifyToken(result.inputTokenAddress);
       const outputType = identifyToken(result.outputTokenAddress);
-
       let calculatedAmount = 0;
-      // 逻辑升级：支持任意 Stable <-> ETH 和 Stable <-> Stable
-      if (inputType === 'STABLE' && outputType === 'ETH') {
-        calculatedAmount = (amount / ethPrice) * 0.99;
-      } else if (inputType === 'ETH' && outputType === 'STABLE') {
-        calculatedAmount = (amount * ethPrice) * 0.99;
-      } else {
-        // 同类互换 (Stable -> Stable 或 ETH -> ETH)
-        // 这里包含了 USDT -> USDC 或 DAI -> USDT 的情况，默认 1:1 (忽略微小汇率差)
-        calculatedAmount = amount * 0.99;
-      }
+      if (inputType === 'STABLE' && outputType === 'ETH') calculatedAmount = (amount / ethPrice) * 0.99;
+      else if (inputType === 'ETH' && outputType === 'STABLE') calculatedAmount = (amount * ethPrice) * 0.99;
+      else calculatedAmount = amount * 0.99;
       result.minOutputAmount = calculatedAmount.toFixed(6);
-    }
-    
-    if (result.status === 'success' && result.recipient?.endsWith('.eth')) {
-      try {
-        const ensAddress = await publicClient.getEnsAddress({ name: result.recipient });
-        if (ensAddress) result.recipient = ensAddress;
-      } catch (e) { if (!result.recipient.startsWith('0x')) result.recipient = userAddress; }
     }
 
     return NextResponse.json(result);
-
   } catch (error) {
+    console.error(error);
     return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }

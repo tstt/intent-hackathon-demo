@@ -1,6 +1,13 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [v1.1.1] - 2025-12-19
+### Fixed
+- 在最终意图签名流程中增加签名验证，确保签名与意图匹配并且未被篡改（增加对签名格式与 EIP-712 消息体的一致性检查）。
+
+### Notes
+- 该补丁修复提高了安全性，属于向后兼容的修复（patch）。
+
 ## [v1.1.0] - 2025-12-19
 ### Added
 - 增加价格估算：在确认卡中显示最小可接受输出（`minOutputAmount`），基于内置汇率或拉取的价格源进行估算（可配置）。

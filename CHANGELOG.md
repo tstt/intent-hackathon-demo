@@ -1,7 +1,16 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [v1.1.0] - 2025-12-19
+### Added
+- 增加价格估算：在确认卡中显示最小可接受输出（`minOutputAmount`），基于内置汇率或拉取的价格源进行估算（可配置）。
+- 扩展代币识别：新增 USDT、DAI 以及更多链上代币的识别规则和地址别名映射。
+- 支持 ENS 解析：输入支持 ENS 名称解析为以太坊地址并显示解析结果。
+- 小幅 UI 优化与更严格的输入校验（减低误触发风险）。
 
+### Notes
+- 该版本为非破坏性小版本（minor），保持与 v1.0.0 的向后兼容。
+- 发布分支：`release/v1.1.0`
 ## [v1.0.0] - 2025-12-19
 ### Added
 - 初始实现：自然语言意图解析（AI -> /api/parse）。

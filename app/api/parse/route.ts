@@ -1,117 +1,164 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { createPublicClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
 
-// 1. 初始化 OpenAI 客户端 (连接到 OpenRouter)
+const publicClient = createPublicClient({ chain: mainnet, transport: http() });
 const openai = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
-  baseURL: "https://openrouter.ai/api/v1", // 指向 OpenRouter
-  defaultHeaders: {
-    "HTTP-Referer": "http://localhost:3000", // OpenRouter 要求
-    "X-Title": "Intent Hackathon Demo",
-  },
+  baseURL: "https://openrouter.ai/api/v1",
+  defaultHeaders: { "HTTP-Referer": "http://localhost:3000", "X-Title": "Hackathon Demo" },
 });
 
-// 2. 定义白名单知识库 (硬编码的世界状态) [cite: 50, 55]
+// --- 1. 扩充知识库 (新增 USDT, DAI) ---
 const TOKEN_WHITELIST = {
-  "42161": { // Arbitrum One
+  "42161": { // Arbitrum
     "USDC": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-    "ETH": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
+    "ETH": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    "USDT": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+    "DAI": "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
   },
   "8453": { // Base
     "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    "ETH": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
-  },
-  "10": { // Optimism
-    "USDT": "0x94b008aa00579c1307b0ef2c499ad98a8ce98706",
-    "ETH": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
+    "ETH": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    "USDT": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+    "DAI": "0x50c5725949a6f0c72e6c4a641f24049a917db0cb"
   },
   "1": { // Mainnet
     "ETH": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
-    "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "USDT": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "DAI": "0x6b175474e89094c44da98b954eedeac495271d0f"
   }
 };
+const CHAIN_ID_MAP = { "ethereum": 1, "mainnet": 1, "optimism": 10, "arbitrum": 42161, "base": 8453 };
 
-const CHAIN_ID_MAP = {
-  "ethereum": 1,
-  "mainnet": 1,
-  "optimism": 10,
-  "op": 10,
-  "arbitrum": 42161,
-  "arb": 42161,
-  "base": 8453
-};
+async function getEthPrice() {
+  try {
+    const res = await fetch('https://min-api.cryptocompare.com/data/price?fsym=ETH&tsyms=USD');
+    const data = await res.json();
+    return data.USD || 3000;
+  } catch (e) { return 3000; }
+}
+
+// --- 2. 升级代币识别逻辑 (包含新地址) ---
+function identifyToken(address: string) {
+  if (!address) return 'OTHER';
+  const addr = address.toLowerCase();
+  
+  // ETH & WETH
+  if ([
+    "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", // Native
+    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // Mainnet WETH
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // Arb WETH
+    "0x4200000000000000000000000000000000000006"  // Base WETH
+  ].includes(addr)) return 'ETH';
+
+  // Stablecoins (USDC, USDT, DAI)
+  if ([
+    // USDC
+    "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    // USDT
+    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+    "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2",
+    "0xdac17f958d2ee523a2206206994597c13d831ec7",
+    // DAI
+    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",
+    "0x6b175474e89094c44da98b954eedeac495271d0f"
+  ].includes(addr)) return 'STABLE';
+
+  return 'OTHER';
+}
 
 export async function POST(req: Request) {
   try {
     const { prompt, userAddress, currentChainId } = await req.json();
-
-    console.log("收到意图请求:", prompt);
-
-    // 3. 构建 System Prompt [cite: 42, 46, 158]
+    const ethPrice = await getEthPrice();
+    
     const systemPrompt = `
-      You are a professional Cross-Chain DeFi Intent Parser.
-      Your task is to convert user natural language into a strict JSON object.
-
-      Context:
-      - User Current Address: ${userAddress || "0x0000000000000000000000000000000000000000"}
-      - User Current Chain ID: ${currentChainId || 42161}
+      You are a DeFi Intent Parser.
+      Context: UserChain=${currentChainId || 42161}, UserAddr=${userAddress}
       
-      Knowledge Base (Token Whitelist):
-      ${JSON.stringify(TOKEN_WHITELIST, null, 2)}
+      CRITICAL RULES:
+      1. DIRECTION: "Swap A for B" means Input=A, Output=B. DO NOT REVERSE.
+      2. AMBIGUITY: If destination chain is set but output token is unknown (e.g. "to Mainnet"), status="ambiguous".
+      3. DEFAULT CHAIN: If user says "on Mainnet" for a swap, BOTH source and destination are 1.
       
-      Chain ID Map:
-      ${JSON.stringify(CHAIN_ID_MAP, null, 2)}
-
-      Rules:
-      1. Identify sourceChainId, destinationChainId, inputTokenAddress, inputAmount, outputTokenAddress, recipient.
-      2. IF source chain is not specified, use User Current Chain ID.
-      3. IF destination chain is not specified, infer from context (e.g., "bridge to Base"). If cannot infer, error.
-      4. inputAmount should be a STRING (e.g., "100.5"). Do NOT convert units (keep it as decimal representation).
-      5. minOutputAmount should be inputAmount * 0.99 (simulating 1% slippage/fee).
-      6. recipient defaults to User Current Address unless specified otherwise.
-      7. Return JSON ONLY. No markdown formatting.
-
-      Required JSON Schema:
+      STRICT JSON (No nesting):
       {
-        "intentType": "cross-chain-swap",
-        "sourceChainId": number,
+        "status": "success" | "ambiguous",
+        "message": "string (if ambiguous)",
+        "sourceChainId": number, 
         "destinationChainId": number,
-        "inputTokenAddress": "0x...",
+        "inputTokenAddress": "0x...", 
         "inputAmount": "string",
         "outputTokenAddress": "0x...",
-        "minOutputAmount": "string",
-        "recipient": "0x..."
+        "minOutputAmount": "0",
+        "recipient": "string"
       }
+      
+      Tokens: ${JSON.stringify(TOKEN_WHITELIST)}
+      Chains: ${JSON.stringify(CHAIN_ID_MAP)}
     `;
 
-    // 4. 调用 AI (使用 gpt-4o 或类似高智商模型以确保 JSON 格式准确) [cite: 33, 120]
     const completion = await openai.chat.completions.create({
-      model: "openai/gpt-4o-2024-08-06", // OpenRouter 支持此模型，适合结构化输出
+      model: "openai/gpt-5.2", 
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: prompt }
       ],
-      response_format: { type: "json_object" }, // 强制 JSON 模式
-      temperature: 0.1, // 降低随机性
+      response_format: { type: "json_object" },
+      temperature: 0.1, 
     });
 
-    const content = completion.choices[0].message.content;
+    let result = JSON.parse(completion.choices[0].message.content || "{}");
     
-    if (!content) {
-      throw new Error("AI returned empty response");
+    if (result.data) result = { ...result, ...result.data };
+    if (result.intent) result = { ...result, ...result.intent };
+
+    if (prompt.toLowerCase().includes("swap") && prompt.toLowerCase().includes("mainnet")) {
+        if (!result.sourceChainId || result.sourceChainId === 42161) {
+            result.sourceChainId = 1;
+        }
     }
 
-    const parsedIntent = JSON.parse(content);
+    if (result.status === 'ambiguous') return NextResponse.json(result);
     
-    console.log("AI 解析结果:", parsedIntent);
+    if (!result.sourceChainId) result.sourceChainId = currentChainId || 42161;
+    if (!result.recipient) result.recipient = userAddress;
 
-    return NextResponse.json(parsedIntent);
+    if (result.status === 'success') {
+      const amount = parseFloat(result.inputAmount || "0");
+      const inputType = identifyToken(result.inputTokenAddress);
+      const outputType = identifyToken(result.outputTokenAddress);
+
+      let calculatedAmount = 0;
+      // 逻辑升级：支持任意 Stable <-> ETH 和 Stable <-> Stable
+      if (inputType === 'STABLE' && outputType === 'ETH') {
+        calculatedAmount = (amount / ethPrice) * 0.99;
+      } else if (inputType === 'ETH' && outputType === 'STABLE') {
+        calculatedAmount = (amount * ethPrice) * 0.99;
+      } else {
+        // 同类互换 (Stable -> Stable 或 ETH -> ETH)
+        // 这里包含了 USDT -> USDC 或 DAI -> USDT 的情况，默认 1:1 (忽略微小汇率差)
+        calculatedAmount = amount * 0.99;
+      }
+      result.minOutputAmount = calculatedAmount.toFixed(6);
+    }
+    
+    if (result.status === 'success' && result.recipient?.endsWith('.eth')) {
+      try {
+        const ensAddress = await publicClient.getEnsAddress({ name: result.recipient });
+        if (ensAddress) result.recipient = ensAddress;
+      } catch (e) { if (!result.recipient.startsWith('0x')) result.recipient = userAddress; }
+    }
+
+    return NextResponse.json(result);
 
   } catch (error) {
-    console.error("AI Error:", error);
-    return NextResponse.json(
-      { error: "Failed to parse intent" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }
